@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>التدخل السريع – بلدية نابل</title>
+<link rel="manifest" href="manifest.json">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--g:#1f5c4a;--bg:#f6f7f5;--r:#c62828;--t:#1d2521}
+*{box-sizing:border-box}
+body{margin:0;font-family:Tajawal,Tahoma,sans-serif;background:var(--bg);color:var(--t)}
+header{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#fff;border-bottom:3px solid var(--g)}
+header img{height:52px}header h1{font-size:19px;margin:0;color:var(--g)}
+main{max-width:560px;margin:0 auto;padding:14px}
+.card{background:#fff;border:1px solid #dde3df;border-radius:10px;padding:12px;margin-bottom:12px}
+input,select,textarea,button{font:inherit;width:100%;padding:10px;margin:5px 0;border:1px solid #b9c4be;border-radius:8px}
+button{background:var(--g);color:#fff;border:0;cursor:pointer;font-weight:700}
+button.alt{background:#fff;color:var(--g);border:1px solid var(--g)}
+.alert{background:var(--r);color:#fff;padding:12px;border-radius:10px;font-weight:700;margin-bottom:12px;animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.6}}
+@media(prefers-reduced-motion:reduce){.alert{animation:none}}
+.open{border-color:var(--r);border-width:2px}.done{opacity:.75}
+img.p{width:100%;border-radius:8px;margin-top:6px}
+small{color:#5b6660}.err{color:var(--r)}
+</style>
+</head>
+<body>
+<header><img src="logo.png" alt="بلدية نابل"><h1>التدخل السريع – بلدية نابل</h1></header>
+<main id="app"></main>
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {getAuth,createUserWithEmailAndPassword,signInWithEmailAndPassword,onAuthStateChanged,signOut} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getFirestore,doc,setDoc,getDoc,addDoc,updateDoc,collection,query,where,orderBy,onSnapshot,getDocs,limit,serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ⬇️ الصق هنا إعدادات مشروع Firebase (Project settings > Your apps > Web)
+const firebaseConfig={apiKey:"AIzaSyBzLfwyt4Lzj7FIsfMrTaso5OH4-N97lOY",authDomain:"tadakol-nabeul.firebaseapp.com",projectId:"tadakol-nabeul",storageBucket:"tadakol-nabeul.firebasestorage.app",messagingSenderId:"367222968814",appId:"1:367222968814:web:eb0ec059ffe0be2a5ebeff"};
+
+const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app);
+const $=document.getElementById("app");
+const TYPES=["فضلات منزلية","عطب في الإنارة العمومية","أنقاض بناء","أشجار","مخالفات عمرانية"];
+const mail=c=>c+"@tadakhol-nabeul.app";
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let me=null,unsub=[],beeper=null,soundOn=false;
+
+function stop(){unsub.forEach(f=>f());unsub=[];clearInterval(beeper);beeper=null}
+function beep(){try{const a=new AudioContext(),o=a.createOscillator();o.frequency.value=880;o.connect(a.destination);o.start();setTimeout(()=>{o.stop();a.close()},350)}catch{}}
+function compress(file){return new Promise((ok,no)=>{const im=new Image();im.onload=()=>{const k=Math.min(1,900/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=im.width*k;c.height=im.height*k;c.getContext("2d").drawImage(im,0,0,c.width,c.height);ok(c.toDataURL("image/jpeg",.6))};im.onerror=no;im.src=URL.createObjectURL(file)})}
+async function wake(){try{await navigator.wakeLock.request("screen")}catch{}}
+
+onAuthStateChanged(auth,async u=>{
+  stop();
+  if(!u){return authView()}
+  const s=await getDoc(doc(db,"users",u.uid));
+  if(!s.exists()){return authView("الحساب غير موجود")}
+  me={uid:u.uid,...s.data()};
+  me.role==="citizen"?citizenView():staffView();
+});
+
+function authView(msg=""){
+  $.innerHTML=`<div class="card"><b>دخول</b>
+  <input id="l_cin" inputmode="numeric" placeholder="رقم بطاقة التعريف">
+  <input id="l_pw" type="password" placeholder="الرمز السري">
+  <button id="b_in">دخول</button><p class="err" id="e1">${esc(msg)}</p></div>
+  <div class="card"><b>حساب جديد</b>
+  <input id="r_n" placeholder="الاسم"><input id="r_s" placeholder="اللقب">
+  <input id="r_cin" inputmode="numeric" maxlength="8" placeholder="رقم بطاقة التعريف (8 أرقام)">
+  <input id="r_pw" type="password" placeholder="رمز سري (6 خانات على الأقل)">
+  <button class="alt" id="b_reg">إنشاء حساب</button><p class="err" id="e2"></p></div>`;
+  const v=id=>document.getElementById(id).value.trim();
+  document.getElementById("b_in").onclick=()=>signInWithEmailAndPassword(auth,mail(v("l_cin")),v("l_pw")).catch(()=>e1.textContent="رقم البطاقة أو الرمز غير صحيح");
+  document.getElementById("b_reg").onclick=async()=>{
+    if(!/^\d{8}$/.test(v("r_cin")))return e2.textContent="رقم البطاقة يجب أن يكون 8 أرقام";
+    if(!v("r_n")||!v("r_s"))return e2.textContent="أكمل الاسم واللقب";
+    try{const c=await createUserWithEmailAndPassword(auth,mail(v("r_cin")),v("r_pw"));
+      await setDoc(doc(db,"users",c.user.uid),{name:v("r_n"),surname:v("r_s"),cin:v("r_cin"),role:"citizen"});
+      location.reload()
+    }catch(e){e2.textContent=e.code==="auth/email-already-in-use"?"رقم البطاقة مسجل مسبقا":"تعذر إنشاء الحساب (الرمز 6 خانات على الأقل)"}
+  };
+}
+
+function top(){return `<div class="card">${esc(me.name)} ${esc(me.surname)} <button class="alt" id="out">خروج</button></div>`}
+
+function citizenView(){
+  $.innerHTML=top()+`<div class="card"><b>إرسال إشعار</b>
+  <select id="ty">${TYPES.map(t=>`<option>${t}</option>`).join("")}</select>
+  <textarea id="ds" rows="3" placeholder="المكان والتفاصيل"></textarea>
+  <input id="ph" type="file" accept="image/*" capture="environment">
+  <button id="go">إرسال</button><p id="msg"></p></div><div id="mine"></div>`;
+  out.onclick=()=>signOut(auth);
+  go.onclick=async()=>{
+    if(!ph.files[0])return msg.textContent="أضف صورة";
+    go.disabled=true;msg.textContent="جاري الإرسال...";
+    try{const url=await compress(ph.files[0]);
+      await addDoc(collection(db,"reports"),{uid:me.uid,type:ty.value,desc:ds.value,photo:url,status:"open",createdAt:serverTimestamp()});
+      msg.textContent="تم الإرسال";ds.value="";ph.value=""
+    }catch{msg.textContent="فشل الإرسال، أعد المحاولة"}
+    go.disabled=false};
+  unsub.push(onSnapshot(query(collection(db,"reports"),where("uid","==",me.uid),orderBy("createdAt","desc")),s=>{
+    mine.innerHTML=s.docs.map(d=>{const r=d.data();return `<div class="card ${r.status}"><b>${esc(r.type)}</b><br>${esc(r.desc)}<br><small>${r.status==="done"?"تم التدخل ✔":"في الانتظار"}</small></div>`}).join("")}));
+}
+
+function staffView(){
+  $.innerHTML=top()+`<button id="snd">تفعيل الصوت (خلّي التطبيق مفتوح)</button><div id="al"></div>
+  ${me.role==="admin"?`<div class="card"><b>إضافة عون (بواسطة رقم البطاقة)</b><input id="ac" inputmode="numeric" placeholder="رقم بطاقة العون">
+  <button class="alt" id="ab">تعيين كعون</button><button class="alt" id="ar">سحب صفة العون</button><p id="am"></p></div>`:""}
+  <div id="list"></div>`;
+  out.onclick=()=>signOut(auth);
+  snd.onclick=()=>{soundOn=true;beep();wake();snd.remove()};
+  if(me.role==="admin"){
+    const setRole=async role=>{const q=await getDocs(query(collection(db,"users"),where("cin","==",ac.value.trim())));
+      if(q.empty)return am.textContent="لا يوجد حساب بهذا الرقم (يجب أن يسجل أولا)";
+      await updateDoc(q.docs[0].ref,{role});am.textContent="تم"};
+    ab.onclick=()=>setRole("agent");ar.onclick=()=>setRole("citizen");
+  }
+  unsub.push(onSnapshot(query(collection(db,"reports"),orderBy("createdAt","desc"),limit(50)),s=>{
+    const open=s.docs.filter(d=>d.data().status==="open").length;
+    al.innerHTML=open?`<div class="alert">🔴 ${open} إشعار في انتظار التدخل</div>`:"";
+    clearInterval(beeper);if(open&&soundOn)beeper=setInterval(beep,3000);
+    list.innerHTML=s.docs.map(d=>{const r=d.data(),t=r.createdAt?.toDate().toLocaleString("ar-TN")||"";
+      return `<div class="card ${r.status}"><b>${esc(r.type)}</b> <small>${t}</small><br>${esc(r.desc)}
+      <img class="p" src="${esc(r.photo)}" alt="">
+      ${r.status==="open"?`<input type="file" accept="image/*" capture="environment" data-id="${d.id}"><small>صوّر المكان بعد التنظيف لإنهاء التنبيه</small>`
+      :`<small>تم التدخل: ${r.doneAt?.toDate().toLocaleString("ar-TN")||""}</small><img class="p" src="${esc(r.after)}" alt="">`}</div>`}).join("");
+    list.querySelectorAll("input[type=file]").forEach(i=>i.onchange=async()=>{
+      if(!i.files[0])return;i.disabled=true;
+      const url=await compress(i.files[0]);
+      await updateDoc(doc(db,"reports",i.dataset.id),{status:"done",after:url,doneAt:serverTimestamp(),doneBy:me.uid})});
+  }));
+}
+</script>
+</body>
+</html>

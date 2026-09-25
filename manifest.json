@@ -1,0 +1,24 @@
+{
+  "name": "التدخل السريع - بلدية نابل",
+  "short_name": "التدخل السريع",
+  "description": "تطبيق الإبلاغ السريع عن المشاكل البلدية - بلدية نابل",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#c8792e",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
